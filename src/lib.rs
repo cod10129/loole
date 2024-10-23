@@ -63,6 +63,8 @@ use queue::Queue;
 use crate::mutex::Mutex;
 use crate::signal::{Signal, SyncSignal};
 
+pub mod spsc;
+
 /// An error that occurs when trying to receive a value from a channel after all senders have been
 /// dropped and there are no more messages in the channel.
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]

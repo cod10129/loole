@@ -2,6 +2,7 @@
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use loole::{bounded, unbounded, Receiver, RecvError, SendError, Sender};
+use loole::spsc::{Receiver as SpscReceiver, Sender as SpscSender};
 use std::{error::Error, future::Future, thread, time::Instant};
 
 use std::fmt::{Debug, Display};
@@ -256,6 +257,36 @@ where
         let mut c = 0;
         loop {
             match recv_async(&rx).await {
+                Ok(_) => c += 1,
+                Err(_) => break c,
+            }
+        }
+    }))
+}
+
+fn create_spsc_sender<T>(tx: SpscSender<T>, n: usize) -> JoinHandle<usize>
+where 
+    T: From<usize> + Send + 'static
+{
+    JoinHandle::Sync(thread::spawn(move || {
+        for k in 0..n {
+            match tx.send(k.into()) {
+                Ok(_) => (),
+                Err(_) => println!("error: channel closed at: {k}"),
+            }
+        }
+        n
+    }))
+}
+
+fn create_spsc_receiver<T>(rx: SpscReceiver<T>) -> JoinHandle<usize>
+where 
+    T: From<usize> + Send + 'static
+{
+    JoinHandle::Sync(thread::spawn(move || {
+        let mut c = 0;
+        loop {
+            match rx.recv() {
                 Ok(_) => c += 1,
                 Err(_) => break c,
             }
@@ -528,6 +559,29 @@ fn criterion_benchmarks(c: &mut Criterion) {
                     black_box(buffer_size),
                     msg_no,
                 ))
+            })
+        });
+    }
+
+    // Current perf results are HALF the time of SPSC1
+    {
+        let mut spsc = c.benchmark_group("SPSC2");
+        spsc.sample_size(sample_size);
+        spsc.bench_function("1_sync_1_sync", |b| {
+            b.iter(|| {
+                rt.block_on({
+                    // let n = msg_no / 1 + if 0 < msg_no % 1 { 1 } else { 0 };
+                    let n = msg_no + 1;
+                    let cap = black_box(buffer_size).unwrap();
+                    let (tx, rx) = loole::spsc::bounded::<usize>(cap);
+                    let sender = create_spsc_sender(tx, n);
+                    let receiver = create_spsc_receiver(rx);
+                    async move {
+                        Ok::<_, BenchError>(
+                            calculate_benchmark_result(vec![sender], vec![receiver]).await
+                        )
+                    }
+                })
             })
         });
     }
